@@ -19,8 +19,7 @@
     "express": "^4.21.2",
     "helmet": "^8.0.0",
     "morgan": "^1.10.0",
-    "node-cache": "^5.1.2",
-    "yahoo-finance2": "^3.0.0"
+    "node-cache": "^5.1.2"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",

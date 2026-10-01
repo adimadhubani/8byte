@@ -1,43 +1,41 @@
-import YahooFinance from "yahoo-finance2";
+import axios from "axios";
 import { priceCache } from "./cacheService";
-import { logger } from "../utils/logger";
 
-const yf = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
+const CACHE_TTL = 15;
+const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// Yahoo se live price nikalta hai, fail ho toh null
 export async function fetchLivePrice(ticker: string): Promise<number | null> {
   const cacheKey = `cmp:${ticker}`;
   const cached = priceCache.get<number>(cacheKey);
-
-  if (cached !== undefined) {
-    return cached;
-  }
-
-  // jitter daal rahe hain taaki thundering herd na bane
-  const jitterMs = Math.floor(Math.random() * 200) + 100;
-  await delay(jitterMs);
+  if (cached !== undefined) return cached;
 
   try {
-    const quote = await yf.quote(ticker);
-    const price = quote?.regularMarketPrice ?? null;
+    // direct chart endpoint, no crumb needed
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1m&range=1d`;
+    const res = await axios.get(url, {
+      headers: { "User-Agent": UA, Accept: "application/json" },
+      timeout: 6000
+    });
 
-    if (price !== null && typeof price === "number") {
-      // 15s TTL = UI refresh interval, isse rate limit nahi lagta
-      priceCache.set(cacheKey, price, 15);
+    const meta = res.data?.chart?.result?.[0]?.meta;
+    const price = meta?.regularMarketPrice ?? meta?.previousClose ?? null;
+
+    if (typeof price === "number") {
+      priceCache.set(cacheKey, price, CACHE_TTL);
       return price;
     }
-
     return null;
-  } catch (err: unknown) {
-    // yahoo kabhi kabhi 401 ya timeout deta hai, silent fallback
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.warn(`Yahoo CMP fail (${ticker}): ${msg}`);
+  } catch (err) {
+    const msg = (err as Error).message;
+    // silent fail, caller handles null
+    if (!msg.includes("429")) {
+      console.warn(`Yahoo price fail ${ticker}: ${msg}`);
+    }
     return null;
   }
 }
 
-export const marketData = {
-  fetchLivePrice
-};
+// jitter delay helper (agar currently use kar rahe ho)
+export function jitter(ms = 200) {
+  return new Promise((r) => setTimeout(r, Math.random() * ms));
+}

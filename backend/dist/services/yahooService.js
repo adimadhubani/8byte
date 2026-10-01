@@ -3,40 +3,42 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.marketData = void 0;
 exports.fetchLivePrice = fetchLivePrice;
-const yahoo_finance2_1 = __importDefault(require("yahoo-finance2"));
+exports.jitter = jitter;
+const axios_1 = __importDefault(require("axios"));
 const cacheService_1 = require("./cacheService");
-const logger_1 = require("../utils/logger");
-const yf = new yahoo_finance2_1.default({ suppressNotices: ["yahooSurvey"] });
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-// Yahoo se live price nikalta hai, fail ho toh null
+const CACHE_TTL = 15;
+const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 async function fetchLivePrice(ticker) {
     const cacheKey = `cmp:${ticker}`;
     const cached = cacheService_1.priceCache.get(cacheKey);
-    if (cached !== undefined) {
+    if (cached !== undefined)
         return cached;
-    }
-    // jitter daal rahe hain taaki thundering herd na bane
-    const jitterMs = Math.floor(Math.random() * 200) + 100;
-    await delay(jitterMs);
     try {
-        const quote = await yf.quote(ticker);
-        const price = quote?.regularMarketPrice ?? null;
-        if (price !== null && typeof price === "number") {
-            // 15s TTL = UI refresh interval, isse rate limit nahi lagta
-            cacheService_1.priceCache.set(cacheKey, price, 15);
+        // direct chart endpoint, no crumb needed
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1m&range=1d`;
+        const res = await axios_1.default.get(url, {
+            headers: { "User-Agent": UA, Accept: "application/json" },
+            timeout: 6000
+        });
+        const meta = res.data?.chart?.result?.[0]?.meta;
+        const price = meta?.regularMarketPrice ?? meta?.previousClose ?? null;
+        if (typeof price === "number") {
+            cacheService_1.priceCache.set(cacheKey, price, CACHE_TTL);
             return price;
         }
         return null;
     }
     catch (err) {
-        // yahoo kabhi kabhi 401 ya timeout deta hai, silent fallback
-        const msg = err instanceof Error ? err.message : String(err);
-        logger_1.logger.warn(`Yahoo CMP fail (${ticker}): ${msg}`);
+        const msg = err.message;
+        // silent fail, caller handles null
+        if (!msg.includes("429")) {
+            console.warn(`Yahoo price fail ${ticker}: ${msg}`);
+        }
         return null;
     }
 }
-exports.marketData = {
-    fetchLivePrice
-};
+// jitter delay helper (agar currently use kar rahe ho)
+function jitter(ms = 200) {
+    return new Promise((r) => setTimeout(r, Math.random() * ms));
+}
