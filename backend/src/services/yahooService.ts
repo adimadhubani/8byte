@@ -16,7 +16,7 @@ export async function fetchLivePrice(ticker: string): Promise<number | null> {
       headers: { "User-Agent": UA, Accept: "application/json" },
       timeout: 6000
     });
-
+    // test
     const meta = res.data?.chart?.result?.[0]?.meta;
     const price = meta?.regularMarketPrice ?? meta?.previousClose ?? null;
 
